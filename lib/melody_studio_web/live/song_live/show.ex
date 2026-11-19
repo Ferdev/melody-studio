@@ -33,6 +33,8 @@ defmodule MelodyStudioWeb.SongLive.Show do
         ai?={@ai?}
         rhythm_source={@rhythm_source}
         loading?={@rhythm_loading?}
+        genre_query={@genre_query}
+        custom_genre_error={@custom_genre_error}
       />
       <.build_step
         :if={@step == "build"}
@@ -63,6 +65,8 @@ defmodule MelodyStudioWeb.SongLive.Show do
      |> assign(:stems?, Stems.configured?())
      |> assign(:rhythm_loading?, false)
      |> assign(:rhythm_source, nil)
+     |> assign(:genre_query, "")
+     |> assign(:custom_genre_error, nil)
      |> assign(:mix_loading?, false)
      |> assign(:mix_source, nil)
      |> assign_song(song)
@@ -128,8 +132,23 @@ defmodule MelodyStudioWeb.SongLive.Show do
 
   def handle_event("choose_genre", %{"genre" => genre}, socket) do
     case Studio.update_song_style(scope(socket), socket.assigns.song, %{genre: genre}) do
-      {:ok, _} -> {:noreply, socket |> assign(:rhythm_source, nil) |> reload()}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Please choose a style from the list.")}
+      {:ok, _} ->
+        {:noreply, socket |> assign(rhythm_source: nil, custom_genre_error: nil) |> reload()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Please choose a style from the list.")}
+    end
+  end
+
+  def handle_event("search_genres", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :genre_query, String.slice(query, 0, 60))}
+  end
+
+  def handle_event("custom_genre", %{"genre" => genre}, socket) do
+    if String.trim(genre) == "" do
+      {:noreply, assign(socket, :custom_genre_error, "Please type a style.")}
+    else
+      save_custom_genre(socket, genre)
     end
   end
 
@@ -308,6 +327,26 @@ defmodule MelodyStudioWeb.SongLive.Show do
       end
     else
       {:noreply, socket}
+    end
+  end
+
+  defp save_custom_genre(socket, genre) do
+    case Studio.update_song_style(scope(socket), socket.assigns.song, %{genre: genre}) do
+      {:ok, song} ->
+        {:noreply,
+         socket
+         |> assign(rhythm_source: nil, custom_genre_error: nil, genre_query: "")
+         |> put_flash(:info, "Your song is now #{Catalog.genre_name(song.genre)}.")
+         |> reload()}
+
+      {:error, changeset} ->
+        message =
+          case changeset.errors[:genre] do
+            {message, _} -> message
+            nil -> "Please type a style."
+          end
+
+        {:noreply, assign(socket, :custom_genre_error, message)}
     end
   end
 

@@ -44,6 +44,8 @@ export interface TrackData {
 
 export interface SongData {
   tempo: number
+  /** The family of built-in sounds for the genre, such as "chiptune". */
+  family?: string
   key: string
   melody: Note[]
   melodyBars: number

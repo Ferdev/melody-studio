@@ -50,7 +50,12 @@ defmodule MelodyStudio.Studio.Song do
   def style_changeset(song, attrs) do
     song
     |> cast(attrs, [:genre, :instruments])
-    |> validate_inclusion(:genre, Catalog.genre_ids())
+    |> update_change(:genre, &Catalog.normalize_genre/1)
+    |> validate_length(:genre, min: 2, message: "Please type at least 2 characters")
+    |> validate_length(:genre,
+      max: Catalog.max_custom_genre(),
+      message: "Please keep it to %{count} characters or fewer"
+    )
     |> validate_subset(:instruments, Catalog.instrument_ids())
   end
 

@@ -2,6 +2,8 @@ import * as Tone from "tone"
 import type { Mix, Note, Rhythm, Section, SongData, TrackData } from "./types"
 import {
   createBass,
+  createChipBass,
+  createChipVoice,
   createDrumKit,
   createGuitar,
   createKeys,
@@ -188,6 +190,7 @@ function scheduleSketch(
   const beat = beatSeconds(data.tempo)
   const bar = beat * 4
   const starts = sectionStarts(data)
+  const chip = data.family === "chiptune"
 
   const eachBar = (callback: (time: number, chord: string, section: Section) => void) => {
     data.sections.forEach((section, index) => {
@@ -200,7 +203,7 @@ function scheduleSketch(
 
   switch (track.instrument) {
     case "melody": {
-      const lead = createLead().connect(output)
+      const lead = (chip ? createChipVoice("lead") : createLead()).connect(output)
       scheduleMelody(data, transport, (time, note) => {
         lead.triggerAttackRelease(midiToFrequency(note.pitch), note.duration * beat * 0.95, time, note.velocity)
       })
@@ -215,7 +218,7 @@ function scheduleSketch(
     }
 
     case "bass": {
-      const bass = createBass().connect(output)
+      const bass = (chip ? createChipBass() : createBass()).connect(output)
       const kick = data.rhythm?.steps.kick ?? []
       eachBar((barTime, symbol, section) => {
         const root = chordRoot(parseChord(symbol), 36)
@@ -234,7 +237,7 @@ function scheduleSketch(
     }
 
     case "keys": {
-      const keys = createKeys().connect(output)
+      const keys = (chip ? createChipVoice("chords") : createKeys()).connect(output)
       eachBar((barTime, symbol, section) => {
         const notes = chordNotes(parseChord(symbol), 60).map(midiToFrequency)
         const velocity = ENERGY_VELOCITY[section.energy]
@@ -248,7 +251,7 @@ function scheduleSketch(
     }
 
     case "guitar": {
-      const guitar = createGuitar().connect(output)
+      const guitar = (chip ? createChipVoice("chords") : createGuitar()).connect(output)
       eachBar((barTime, symbol, section) => {
         const notes = chordNotes(parseChord(symbol), 52).map(midiToFrequency)
         const velocity = ENERGY_VELOCITY[section.energy]
@@ -265,7 +268,7 @@ function scheduleSketch(
     }
 
     case "strings": {
-      const strings = createStrings()
+      const strings = chip ? createChipVoice("pad") : createStrings()
       const filter = new Tone.Filter(2200, "lowpass").connect(output)
       strings.connect(filter)
       eachBar((barTime, symbol, section) => {
@@ -277,7 +280,7 @@ function scheduleSketch(
     }
 
     default: {
-      const pads = createPads().connect(output)
+      const pads = (chip ? createChipVoice("pad") : createPads()).connect(output)
       eachBar((barTime, symbol, section) => {
         const notes = chordNotes(parseChord(symbol), 48).map(midiToFrequency)
         const velocity = ENERGY_VELOCITY[section.energy] * 0.7

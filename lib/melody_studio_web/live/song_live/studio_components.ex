@@ -163,6 +163,63 @@ defmodule MelodyStudioWeb.SongLive.StudioComponents do
             </div>
 
             <p data-role="midi-status" class="text-sm text-base-content/60"></p>
+
+            <div
+              data-role="editor"
+              class="hidden space-y-3 rounded-2xl border border-base-300 p-4"
+            >
+              <div>
+                <h3 class="font-display text-lg font-bold">Fix your notes</h3>
+                <p class="text-sm text-base-content/70">
+                  Tap a note to pick it. Drag it to move it earlier, later, higher or lower.
+                  Drag its right edge to make it longer or shorter.
+                </p>
+              </div>
+              <div class="overflow-x-auto rounded-xl bg-base-200/70">
+                <div data-role="roll" class="relative" style="touch-action: pan-x;"></div>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span data-role="selection" class="w-full text-sm font-semibold sm:w-auto sm:min-w-48">
+                  No note picked yet.
+                </span>
+                <div class="join">
+                  <button type="button" data-edit="earlier" class="btn btn-sm join-item" disabled>
+                    <.icon name="hero-arrow-left" class="size-4" /> Earlier
+                  </button>
+                  <button type="button" data-edit="later" class="btn btn-sm join-item" disabled>
+                    Later <.icon name="hero-arrow-right" class="size-4" />
+                  </button>
+                </div>
+                <div class="join">
+                  <button type="button" data-edit="shorter" class="btn btn-sm join-item" disabled>
+                    <.icon name="hero-minus" class="size-4" /> Shorter
+                  </button>
+                  <button type="button" data-edit="longer" class="btn btn-sm join-item" disabled>
+                    <.icon name="hero-plus" class="size-4" /> Longer
+                  </button>
+                </div>
+                <div class="join">
+                  <button type="button" data-edit="lower" class="btn btn-sm join-item" disabled>
+                    <.icon name="hero-arrow-down" class="size-4" /> Lower
+                  </button>
+                  <button type="button" data-edit="higher" class="btn btn-sm join-item" disabled>
+                    <.icon name="hero-arrow-up" class="size-4" /> Higher
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  data-edit="delete"
+                  class="btn btn-sm btn-ghost text-error"
+                  disabled
+                >
+                  <.icon name="hero-trash" class="size-4" /> Delete note
+                </button>
+              </div>
+              <p class="hidden text-xs text-base-content/60 lg:block">
+                With a note picked, the arrow keys move it, Shift with the left and right arrows
+                changes its length, and Delete removes it.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -209,6 +266,7 @@ defmodule MelodyStudioWeb.SongLive.StudioComponents do
             </li>
             <li>Connect a MIDI keyboard to play with real keys.</li>
             <li>Keep it short: 2 to 8 bars is perfect. The AI repeats it through the song.</li>
+            <li>After you record, you can fix any note below the piano.</li>
           </ul>
         </div>
       </aside>
@@ -264,34 +322,114 @@ defmodule MelodyStudioWeb.SongLive.StudioComponents do
   attr :ai?, :boolean, required: true
   attr :rhythm_source, :atom, default: nil
   attr :loading?, :boolean, default: false
+  attr :genre_query, :string, default: ""
+  attr :custom_genre_error, :string, default: nil
 
   def style_step(assigns) do
+    genres = Catalog.search_genres(assigns.genre_query)
+    assigns = assign(assigns, groups: Catalog.genre_groups(genres), no_match?: genres == [])
+
     ~H"""
     <section class="space-y-4">
       <div class="rounded-box bg-base-100 p-5 shadow-sm">
-        <h2 class="font-display text-xl font-bold">What style is your song?</h2>
-        <p class="mb-4 text-base-content/70">
-          Pick the one that feels right. You can change it later.
-        </p>
-        <div id="genres" class="grid grid-cols-2 gap-3 md:grid-cols-3">
-          <button
-            :for={genre <- Catalog.genres()}
-            id={"genre-#{genre.id}"}
-            type="button"
-            phx-click="choose_genre"
-            phx-value-genre={genre.id}
-            aria-pressed={to_string(@song.genre == genre.id)}
-            class={[
-              "rounded-box border-2 p-4 text-left transition",
-              @song.genre == genre.id && "border-primary bg-primary/10",
-              @song.genre != genre.id && "border-base-200 hover:border-primary/40"
-            ]}
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 class="font-display text-xl font-bold">What style is your song?</h2>
+            <p class="text-base-content/70">
+              Pick one from the list, or type any style you like. You can change it later.
+            </p>
+          </div>
+          <form
+            id="genre-search"
+            phx-change="search_genres"
+            phx-submit="search_genres"
+            class="w-full sm:w-64"
           >
-            <div class="text-3xl">{genre.emoji}</div>
-            <div class="font-display text-lg font-bold">{genre.name}</div>
-            <div class="text-sm text-base-content/70">{genre.blurb}</div>
-          </button>
+            <label class="input w-full rounded-full">
+              <.icon name="hero-magnifying-glass" class="size-4 opacity-60" />
+              <input
+                type="search"
+                name="query"
+                value={@genre_query}
+                placeholder="Search styles"
+                aria-label="Search styles"
+                autocomplete="off"
+                phx-debounce="200"
+              />
+            </label>
+          </form>
         </div>
+
+        <div
+          :if={Catalog.custom_genre?(@song.genre)}
+          id="custom-genre-chosen"
+          class="mt-4 flex items-center gap-3 rounded-box border-2 border-primary bg-primary/10 p-4"
+        >
+          <span class="text-3xl">✨</span>
+          <div>
+            <div class="text-sm text-base-content/70">Your own style</div>
+            <div class="font-display text-lg font-bold">{@song.genre}</div>
+          </div>
+        </div>
+
+        <div id="genres" class="mt-4 space-y-5">
+          <div :for={{group, genres} <- @groups}>
+            <h3 class="mb-2 text-sm font-bold uppercase tracking-wide text-base-content/60">
+              {group}
+            </h3>
+            <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+              <button
+                :for={genre <- genres}
+                id={"genre-#{genre.id}"}
+                type="button"
+                phx-click="choose_genre"
+                phx-value-genre={genre.id}
+                aria-pressed={to_string(@song.genre == genre.id)}
+                class={[
+                  "rounded-box border-2 p-3 text-left transition sm:p-4",
+                  @song.genre == genre.id && "border-primary bg-primary/10",
+                  @song.genre != genre.id && "border-base-200 hover:border-primary/40"
+                ]}
+              >
+                <div class="text-2xl sm:text-3xl">{genre.emoji}</div>
+                <div class="font-display font-bold sm:text-lg">{genre.name}</div>
+                <div class="hidden text-sm text-base-content/70 sm:block">{genre.blurb}</div>
+              </button>
+            </div>
+          </div>
+          <p :if={@no_match?} id="genres-empty" class="text-base-content/70">
+            No style in our list matches "{@genre_query}". You can still use it: type it below.
+          </p>
+        </div>
+
+        <.form
+          for={%{}}
+          as={:custom}
+          id="custom-genre-form"
+          phx-submit="custom_genre"
+          class="mt-5 rounded-box bg-base-200/60 p-4"
+        >
+          <label for="custom-genre-input" class="mb-2 block font-semibold">
+            Don't see your style? Type it here.
+          </label>
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <input
+              id="custom-genre-input"
+              type="text"
+              name="genre"
+              value={if Catalog.custom_genre?(@song.genre), do: @song.genre, else: @genre_query}
+              maxlength={Catalog.max_custom_genre()}
+              placeholder="For example vaporwave, sea shanty or 90s eurodance"
+              class={["input w-full rounded-full", @custom_genre_error && "input-error"]}
+              autocomplete="off"
+            />
+            <button class="btn btn-primary rounded-full">Use this style</button>
+          </div>
+          <p :if={@custom_genre_error} class="mt-2 text-sm text-error">{@custom_genre_error}</p>
+          <p class="mt-2 text-sm text-base-content/60">
+            The AI writes the chords and records the band in the style you type.
+          </p>
+        </.form>
       </div>
 
       <div class="rounded-box bg-base-100 p-5 shadow-sm">
@@ -878,6 +1016,7 @@ defmodule MelodyStudioWeb.SongLive.StudioComponents do
 
     %{
       tempo: song.tempo,
+      family: Catalog.genre_family(song.genre),
       key: song.key,
       melody: Studio.melody_notes(song),
       melodyBars: Melody.bars(Studio.melody_notes(song)),

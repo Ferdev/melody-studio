@@ -122,3 +122,31 @@ export function createClick(): Tone.Synth {
     volume: -14,
   })
 }
+
+/**
+ * 8-bit sounds for chiptune songs: square and triangle waves with short
+ * envelopes, like the sound chips of old game consoles.
+ */
+export function createChipVoice(kind: "lead" | "chords" | "pad"): Tone.PolySynth {
+  const settings = {
+    lead: { type: "square", envelope: { attack: 0.002, decay: 0.1, sustain: 0.6, release: 0.05 }, volume: -16 },
+    chords: { type: "pulse", envelope: { attack: 0.002, decay: 0.15, sustain: 0.2, release: 0.05 }, volume: -24 },
+    pad: { type: "triangle", envelope: { attack: 0.05, decay: 0.2, sustain: 0.7, release: 0.2 }, volume: -16 },
+  }[kind]
+
+  return new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: settings.type } as any,
+    envelope: settings.envelope,
+    volume: settings.volume,
+  })
+}
+
+export function createChipBass(): Tone.MonoSynth {
+  return new Tone.MonoSynth({
+    oscillator: { type: "triangle" },
+    filter: { type: "lowpass", frequency: 8000, Q: 0 },
+    envelope: { attack: 0.002, decay: 0.1, sustain: 0.8, release: 0.05 },
+    filterEnvelope: { attack: 0.001, decay: 0.01, sustain: 1, release: 0.01, baseFrequency: 8000, octaves: 0 },
+    volume: -6,
+  })
+}

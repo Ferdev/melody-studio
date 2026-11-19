@@ -104,6 +104,31 @@ defmodule MelodyStudioWeb.SongLiveTest do
       assert song.rhythm["name"] == "Lazy boom bap"
     end
 
+    test "searches styles and accepts a typed style", %{conn: conn, scope: scope} do
+      song = song_fixture(scope)
+      {:ok, lv, html} = live(conn, ~p"/songs/#{song}?step=style")
+      assert html =~ "Future funk"
+      assert html =~ "Chiptune"
+
+      html = lv |> form("#genre-search", query: "chip") |> render_change()
+      assert has_element?(lv, "#genre-chiptune")
+      refute has_element?(lv, "#genre-rock")
+      assert html =~ "Electronic"
+
+      lv |> form("#genre-search", query: "vaporwave") |> render_change()
+      assert has_element?(lv, "#genres-empty")
+
+      lv |> element("#custom-genre-form") |> render_submit(%{genre: ""})
+      assert render(lv) =~ "Please type a style."
+
+      lv |> element("#custom-genre-form") |> render_submit(%{genre: "Vaporwave"})
+      assert has_element?(lv, "#custom-genre-chosen", "Vaporwave")
+      assert Studio.get_song!(scope, song.id).genre == "Vaporwave"
+
+      lv |> element("#suggest-rhythms") |> render_click()
+      assert render_async(lv) =~ "Four on the floor"
+    end
+
     test "builds the song and shows the band", %{conn: conn, scope: scope} do
       song = ready_song_fixture(scope)
       {:ok, lv, html} = live(conn, ~p"/songs/#{song}?step=build")

@@ -107,9 +107,22 @@ defmodule MelodyStudio.StudioTest do
       assert song.rhythm == nil
     end
 
-    test "only allows known genres and instruments", %{scope: scope} do
+    test "accepts a typed style and only known instruments", %{scope: scope} do
       song = song_fixture(scope)
-      assert {:error, _} = Studio.update_song_style(scope, song, %{genre: "polka"})
+
+      assert {:ok, %{genre: "Sea shanty"}} =
+               Studio.update_song_style(scope, song, %{genre: "  Sea   shanty "})
+
+      # A typed name of a style in the list becomes that style.
+      assert {:ok, %{genre: "future_funk"}} =
+               Studio.update_song_style(scope, song, %{genre: "future FUNK"})
+
+      assert {:error, changeset} = Studio.update_song_style(scope, song, %{genre: "x"})
+      assert %{genre: ["Please type at least 2 characters"]} = errors_on(changeset)
+
+      assert {:error, _} =
+               Studio.update_song_style(scope, song, %{genre: String.duplicate("a", 41)})
+
       assert {:error, _} = Studio.update_song_style(scope, song, %{instruments: ["kazoo"]})
     end
 

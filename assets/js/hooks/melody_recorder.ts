@@ -2,6 +2,7 @@ import * as Tone from "tone"
 import type { HookContext, Note } from "../audio/types"
 import { createClick, createPiano } from "../audio/instruments"
 import { midiToFrequency } from "../audio/theory"
+import { NoteEditor } from "./note_editor"
 
 const COMPUTER_KEYS: Record<string, number> = {
   a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11,
@@ -26,6 +27,8 @@ interface State {
   timers: number[]
   midiAccess: MIDIAccess | null
   cleanup: (() => void)[]
+  editor: NoteEditor | null
+  saveTimer: number
 }
 
 type Self = HookContext & { s: State }
@@ -71,6 +74,7 @@ function refreshButtons(self: Self) {
   set("play", busy || notes.length === 0)
   set("undo", busy || history.length === 0)
   set("clear", busy || notes.length === 0)
+  self.s.editor?.render()
 }
 
 function highlight(self: Self, pitch: number, down: boolean) {
@@ -253,7 +257,14 @@ function clear(self: Self) {
 }
 
 function save(self: Self) {
-  self.pushEvent("save_melody", { notes: self.s.notes })
+  clearTimeout(self.s.saveTimer)
+  self.s.saveTimer = window.setTimeout(() => self.pushEvent("save_melody", { notes: self.s.notes }), 250)
+}
+
+/** Plays a short note so the person hears the note they picked or moved. */
+async function preview(self: Self, pitch: number) {
+  await ensureAudio(self)
+  self.s.piano!.triggerAttackRelease(midiToFrequency(pitch), 0.25, Tone.now(), 0.7)
 }
 
 function connectMidi(self: Self) {
@@ -322,7 +333,24 @@ export const MelodyRecorder = {
       timers: [],
       midiAccess: null,
       cleanup: [],
+      editor: null,
+      saveTimer: 0,
     }
+
+    self.s.editor = new NoteEditor({
+      el: self.el,
+      notes: () => self.s.notes,
+      maxBeats: () => self.s.maxBeats,
+      snap: () => option(self, "snap"),
+      busy: () => self.s.mode !== "idle",
+      remember: (before) => self.s.history.push(before),
+      changed: () => {
+        save(self)
+        setStatus(self, describe(self.s.notes))
+        refreshButtons(self)
+      },
+      preview: (pitch) => preview(self, pitch),
+    })
 
     setStatus(self, describe(notes))
     refreshButtons(self)
@@ -364,7 +392,9 @@ export const MelodyRecorder = {
       return ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName) || event.metaKey || event.ctrlKey || event.altKey
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (typing(event) || event.repeat) return
+      if (typing(event)) return
+      if (self.s.editor?.handleKey(event)) return
+      if (event.repeat) return
       const key = event.key.toLowerCase()
       if (key === "z") self.s.octave = Math.max(self.s.octave - 1, -2)
       if (key === "x") self.s.octave = Math.min(self.s.octave + 1, 2)
@@ -397,6 +427,15 @@ export const MelodyRecorder = {
 
   destroyed(this: Self) {
     clearTimers(this)
+    if (this.s.saveTimer) {
+      clearTimeout(this.s.saveTimer)
+      // Send the last edit before the recorder leaves the page.
+      try {
+        this.pushEvent("save_melody", { notes: this.s.notes })
+      } catch (_error) {
+        // The page is already gone.
+      }
+    }
     this.s.cleanup.forEach((fn) => fn())
     this.s.piano?.dispose()
     this.s.click?.dispose()

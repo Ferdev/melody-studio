@@ -205,8 +205,7 @@ defmodule MelodyStudioWeb.SongLive.Index do
     assign(socket, :form, to_form(Studio.change_song_title(%Song{})))
   end
 
-  defp genre_emoji(nil), do: "🎵"
-  defp genre_emoji(genre), do: (Catalog.genre(genre) || %{emoji: "🎵"}).emoji
+  defp genre_emoji(genre), do: Catalog.genre_emoji(genre)
 
   def status_label("draft"), do: "Idea"
   def status_label("arranging"), do: "AI is planning"
