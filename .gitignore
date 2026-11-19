@@ -35,3 +35,6 @@ melody_studio-*.tar
 npm-debug.log
 /assets/node_modules/
 
+
+# Audio files that the app stores on the local disk.
+/priv/static/uploads/

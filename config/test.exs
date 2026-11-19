@@ -1,5 +1,8 @@
 import Config
 
+# Only in tests, remove the complexity from the password hashing algorithm
+config :bcrypt_elixir, :log_rounds, 1
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used
@@ -42,3 +45,14 @@ config :phoenix,
 
 # Run Oban jobs inline-only in tests
 config :melody_studio, Oban, testing: :manual
+
+# Keep uploaded files of tests out of the app directory
+config :melody_studio, MelodyStudio.Storage.Local,
+  root: Path.expand("../tmp/test_uploads", __DIR__)
+
+# External APIs are stubbed with Req.Test in tests
+config :melody_studio, MelodyStudio.AI.Claude,
+  req_options: [plug: {Req.Test, MelodyStudio.AI.Claude}]
+
+config :melody_studio, MelodyStudio.Stems.Replicate,
+  req_options: [plug: {Req.Test, MelodyStudio.Stems.Replicate}]

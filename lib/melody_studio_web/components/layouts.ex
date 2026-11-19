@@ -31,39 +31,54 @@ defmodule MelodyStudioWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
+  attr :wide, :boolean, default: false, doc: "use the full page width"
+
   slot :inner_block, required: true
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
-      <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" />
-          <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
-        </a>
-      </div>
-      <div class="flex-none">
-        <ul class="flex px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
-          <li>
-            <.theme_toggle />
-          </li>
-          <li>
-            <a href="https://phoenix.hexdocs.pm/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
-            </a>
-          </li>
-        </ul>
-      </div>
+    <header class="sticky top-0 z-20 border-b border-base-300/70 bg-base-100/90 backdrop-blur">
+      <nav class="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3 sm:px-6">
+        <.link navigate={~p"/"} class="flex items-center gap-2 font-display text-lg font-extrabold">
+          <span class="grid size-9 place-items-center rounded-2xl bg-primary text-xl text-primary-content shadow-sm">
+            <.icon name="hero-musical-note-solid" class="size-5" />
+          </span>
+          <span>Melody Studio</span>
+        </.link>
+        <div class="flex-1" />
+        <%= if @current_scope do %>
+          <.link navigate={~p"/songs"} class="btn btn-ghost btn-sm rounded-full">
+            <.icon name="hero-queue-list" class="size-4" /> My songs
+          </.link>
+          <div class="dropdown dropdown-end">
+            <div
+              tabindex="0"
+              role="button"
+              class="btn btn-ghost btn-sm btn-circle"
+              aria-label="Account menu"
+            >
+              <.icon name="hero-user-circle" class="size-6" />
+            </div>
+            <ul
+              tabindex="0"
+              class="menu dropdown-content z-30 mt-2 w-56 rounded-box bg-base-100 p-2 shadow-lg"
+            >
+              <li class="menu-title truncate">{@current_scope.user.email}</li>
+              <li><.link navigate={~p"/users/settings"}>Settings</.link></li>
+              <li><.link href={~p"/users/log-out"} method="delete">Log out</.link></li>
+            </ul>
+          </div>
+        <% else %>
+          <.link navigate={~p"/users/log-in"} class="btn btn-ghost btn-sm rounded-full">Log in</.link>
+          <.link navigate={~p"/users/register"} class="btn btn-primary btn-sm rounded-full">
+            Sign up
+          </.link>
+        <% end %>
+      </nav>
     </header>
 
-    <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
+    <main class="px-4 py-8 sm:px-6 sm:py-12">
+      <div class={["mx-auto space-y-4", @wide && "max-w-6xl", !@wide && "max-w-2xl"]}>
         {render_slot(@inner_block)}
       </div>
     </main>

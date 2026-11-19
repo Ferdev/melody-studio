@@ -23,6 +23,29 @@ end
 config :melody_studio, MelodyStudioWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+if config_env() != :test do
+  config :melody_studio, MelodyStudio.AI.Claude, api_key: System.get_env("ANTHROPIC_API_KEY")
+
+  config :melody_studio, MelodyStudio.Stems.Replicate,
+    api_token: System.get_env("REPLICATE_API_TOKEN"),
+    version: System.get_env("REPLICATE_MUSICGEN_VERSION")
+
+  if bucket = System.get_env("S3_BUCKET") do
+    config :melody_studio, MelodyStudio.Storage, adapter: MelodyStudio.Storage.S3
+    config :melody_studio, MelodyStudio.Storage.S3, bucket: bucket
+
+    config :ex_aws,
+      http_client: ExAws.Request.Req,
+      access_key_id: System.get_env("AWS_ACCESS_KEY_ID"),
+      secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY"),
+      region: System.get_env("AWS_REGION", "us-east-1")
+
+    if host = System.get_env("S3_HOST") do
+      config :ex_aws, :s3, host: host, scheme: "https://"
+    end
+  end
+end
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :melody_studio, MelodyStudioWeb.Endpoint,

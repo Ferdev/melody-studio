@@ -40,6 +40,7 @@ defmodule MelodyStudio.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
+      {:bcrypt_elixir, "~> 3.0"},
       {:phoenix, "~> 1.8.16"},
       {:oban, "~> 2.19"},
       {:ex_aws, "~> 2.5"},

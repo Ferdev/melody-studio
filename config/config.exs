@@ -7,6 +7,19 @@
 # General application configuration
 import Config
 
+config :melody_studio, :scopes,
+  user: [
+    default: true,
+    module: MelodyStudio.Accounts.Scope,
+    assign_key: :current_scope,
+    access_path: [:user, :id],
+    schema_key: :user_id,
+    schema_type: :id,
+    schema_table: :users,
+    test_data_fixture: MelodyStudio.AccountsFixtures,
+    test_setup_helper: :register_and_log_in_user
+  ]
+
 config :melody_studio,
   ecto_repos: [MelodyStudio.Repo],
   generators: [timestamp_type: :utc_datetime]
@@ -39,7 +52,20 @@ config :melody_studio, MelodyStudio.Mailer, adapter: Swoosh.Adapters.Local
 config :melody_studio, Oban,
   engine: Oban.Engines.Basic,
   repo: MelodyStudio.Repo,
-  queues: [default: 10, generation: 3]
+  queues: [default: 10, generation: 3],
+  plugins: [{Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}]
+
+# Audio files. Production can switch to MelodyStudio.Storage.S3 in runtime.exs.
+config :melody_studio, MelodyStudio.Storage, adapter: MelodyStudio.Storage.Local
+
+# Claude writes rhythm ideas, arrangement plans and mix suggestions.
+# The API key is read in config/runtime.exs.
+config :melody_studio, MelodyStudio.AI.Claude, model: "claude-sonnet-5-5"
+
+# The AI music model that makes the audio of each track.
+config :melody_studio, MelodyStudio.Stems,
+  provider: MelodyStudio.Stems.Replicate,
+  max_duration: 30
 
 # Configure esbuild (the version is required)
 config :esbuild,
