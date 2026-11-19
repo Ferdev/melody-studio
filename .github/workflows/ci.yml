@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    env:
+      MIX_ENV: test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # mise.toml is the single place where the project pins its Erlang and
+      # Elixir versions, so CI reads them from there.
+      - name: Read tool versions from mise.toml
+        id: versions
+        run: |
+          otp=$(sed -n 's/^erlang *= *"\(.*\)"/\1/p' mise.toml)
+          elixir=$(sed -n 's/^elixir *= *"\([^"-]*\).*"/\1/p' mise.toml)
+          if [ -z "$otp" ] || [ -z "$elixir" ]; then
+            echo "::error file=mise.toml::Could not read the erlang and elixir versions from mise.toml"
+            exit 1
+          fi
+          echo "otp=$otp" >> "$GITHUB_OUTPUT"
+          echo "elixir=$elixir" >> "$GITHUB_OUTPUT"
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ steps.versions.outputs.otp }}
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+          version-type: strict
+
+      - name: Cache Mix dependencies and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-otp${{ steps.versions.outputs.otp }}-elixir${{ steps.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-otp${{ steps.versions.outputs.otp }}-elixir${{ steps.versions.outputs.elixir }}-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      # The steps below run the same checks as the project's `mix precommit`
+      # alias, without rewriting any files.
+      - name: Compile (warnings are errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Check for unused dependencies in mix.lock
+        run: mix deps.unlock --check-unused
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Run tests
+        run: mix test
