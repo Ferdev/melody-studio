@@ -171,16 +171,83 @@ defmodule MelodyStudioWeb.SongLive.StudioComponents do
               <div>
                 <h3 class="font-display text-lg font-bold">Fix your notes</h3>
                 <p class="text-sm text-base-content/70">
-                  Tap a note to pick it. Drag it to move it earlier, later, higher or lower.
-                  Drag its right edge to make it longer or shorter.
+                  Tap a note to pick it, or draw a box or a lasso around several notes.
+                  Drag picked notes to move them, and drag a right edge to change their length.
+                  Tap a bar number to work on a whole bar.
                 </p>
               </div>
-              <div class="overflow-x-auto rounded-xl bg-base-200/70">
-                <div data-role="roll" class="relative" style="touch-action: pan-x;"></div>
-              </div>
+
               <div class="flex flex-wrap items-center gap-2">
-                <span data-role="selection" class="w-full text-sm font-semibold sm:w-auto sm:min-w-48">
-                  No note picked yet.
+                <div class="join" role="group" aria-label="Selection tool">
+                  <button
+                    type="button"
+                    data-tool="pointer"
+                    class="btn btn-sm join-item btn-active"
+                    aria-pressed="true"
+                    title="Pick notes one by one. Drag on an empty spot to draw a box."
+                  >
+                    <.icon name="hero-cursor-arrow-rays" class="size-4" /> Pick
+                  </button>
+                  <button
+                    type="button"
+                    data-tool="box"
+                    class="btn btn-sm join-item"
+                    aria-pressed="false"
+                    title="Draw a box around the notes you want"
+                  >
+                    <svg
+                      viewBox="0 0 20 20"
+                      class="size-4"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-dasharray="3 2"
+                      aria-hidden="true"
+                    >
+                      <rect x="3" y="4" width="14" height="12" rx="1.5" />
+                    </svg>
+                    Box
+                  </button>
+                  <button
+                    type="button"
+                    data-tool="lasso"
+                    class="btn btn-sm join-item"
+                    aria-pressed="false"
+                    title="Draw a free shape around the notes you want"
+                  >
+                    <svg
+                      viewBox="0 0 20 20"
+                      class="size-4"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M10 3c4.4 0 7 2.2 7 5s-2.6 5-7 5-7-2.2-7-5 2.6-5 7-5Z"
+                        stroke-dasharray="3 2"
+                      />
+                      <path d="M6 12.5c-.8 1.6-.4 3.3 1.2 4 1.3.5 2.2-.3 2-1.5" />
+                    </svg>
+                    Lasso
+                  </button>
+                </div>
+                <button type="button" data-select="all" class="btn btn-sm btn-ghost">
+                  Select all
+                </button>
+                <button type="button" data-select="none" class="btn btn-sm btn-ghost" disabled>
+                  Select none
+                </button>
+              </div>
+
+              <div class="overflow-x-auto rounded-xl bg-base-200/70">
+                <div data-role="roll" class="relative select-none" style="touch-action: pan-x;"></div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <span data-role="selection" class="w-full text-sm font-semibold" aria-live="polite">
+                  No notes picked yet.
                 </span>
                 <div class="join">
                   <button type="button" data-edit="earlier" class="btn btn-sm join-item" disabled>
@@ -212,12 +279,39 @@ defmodule MelodyStudioWeb.SongLive.StudioComponents do
                   class="btn btn-sm btn-ghost text-error"
                   disabled
                 >
-                  <.icon name="hero-trash" class="size-4" /> Delete note
+                  <.icon name="hero-trash" class="size-4" /> Delete
                 </button>
               </div>
+
+              <div
+                data-role="bar-tools"
+                class="hidden flex-wrap items-center gap-2 rounded-xl bg-secondary/10 p-3"
+              >
+                <span data-role="bar-label" class="w-full text-sm font-semibold"></span>
+                <div class="join">
+                  <button type="button" data-bar-edit="earlier" class="btn btn-sm join-item">
+                    <.icon name="hero-arrow-left" class="size-4" /> Move earlier
+                  </button>
+                  <button type="button" data-bar-edit="later" class="btn btn-sm join-item">
+                    Move later <.icon name="hero-arrow-right" class="size-4" />
+                  </button>
+                </div>
+                <button type="button" data-bar-edit="duplicate" class="btn btn-sm">
+                  <.icon name="hero-document-duplicate" class="size-4" /> Repeat
+                </button>
+                <button type="button" data-bar-edit="insert" class="btn btn-sm">
+                  <.icon name="hero-plus" class="size-4" /> Add an empty bar before
+                </button>
+                <button type="button" data-bar-edit="delete" class="btn btn-sm btn-ghost text-error">
+                  <.icon name="hero-trash" class="size-4" /> Remove
+                </button>
+                <p data-role="bar-hint" class="w-full text-xs text-base-content/60"></p>
+              </div>
+
               <p class="hidden text-xs text-base-content/60 lg:block">
-                With a note picked, the arrow keys move it, Shift with the left and right arrows
-                changes its length, and Delete removes it.
+                Shortcuts: arrow keys move the picked notes, Shift with the left and right arrows
+                changes their length, Delete removes them, Ctrl or Cmd with A picks all, and Esc
+                picks none. Hold Shift while you tap or draw to add to the notes you picked.
               </p>
             </div>
           </div>

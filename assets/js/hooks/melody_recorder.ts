@@ -199,6 +199,7 @@ function stop(self: Self) {
     } else {
       self.s.history.push(self.s.notes)
       self.s.notes = tidy(self.s.take, option(self, "snap"))
+      self.s.editor?.clearSelection()
       save(self)
       setStatus(self, `Nice! ${describe(self.s.notes)}`)
     }
@@ -242,6 +243,7 @@ function undo(self: Self) {
   const previous = self.s.history.pop()
   if (!previous) return
   self.s.notes = previous
+  self.s.editor?.clearSelection()
   save(self)
   setStatus(self, `Back to your last take. ${describe(self.s.notes)}`)
   refreshButtons(self)
@@ -340,6 +342,7 @@ export const MelodyRecorder = {
     self.s.editor = new NoteEditor({
       el: self.el,
       notes: () => self.s.notes,
+      setNotes: (notes) => (self.s.notes = notes),
       maxBeats: () => self.s.maxBeats,
       snap: () => option(self, "snap"),
       busy: () => self.s.mode !== "idle",
@@ -392,8 +395,11 @@ export const MelodyRecorder = {
       return ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName) || event.metaKey || event.ctrlKey || event.altKey
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (typing(event)) return
+      const target = event.target as HTMLElement
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return
+      // The note editor has shortcuts with Ctrl or Cmd, so it sees the key first.
       if (self.s.editor?.handleKey(event)) return
+      if (typing(event)) return
       if (event.repeat) return
       const key = event.key.toLowerCase()
       if (key === "z") self.s.octave = Math.max(self.s.octave - 1, -2)
