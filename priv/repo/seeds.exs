@@ -2,10 +2,21 @@
 #
 #     mix run priv/repo/seeds.exs
 #
-# Inside the script, you can read and write to any of your
-# repositories directly:
-#
-#     MelodyStudio.Repo.insert!(%MelodyStudio.SomeSchema{})
-#
-# We recommend using the bang functions (`insert!`, `update!`
-# and so on) as they will fail if something goes wrong.
+# `mix ecto.setup` and `mix ecto.reset` also run it. Running it again is safe.
+
+alias MelodyStudio.Accounts
+
+if Mix.env() == :dev do
+  # A test account for development. Log in at /users/log-in with these details.
+  email = "test@example.com"
+  password = "melodystudio123"
+
+  case Accounts.get_user_by_email(email) do
+    nil ->
+      {:ok, _user} = Accounts.register_user(%{email: email, password: password})
+      IO.puts("Created the test user #{email} with the password #{password}")
+
+    _user ->
+      IO.puts("The test user #{email} already exists")
+  end
+end

@@ -20,7 +20,7 @@ mix setup
 mix phx.server
 ```
 
-Then open http://localhost:4000 and create an account.
+Then open http://localhost:4000 and create an account, or log in with the test account that `mix setup` makes in development: `test@example.com` with the password `melodystudio123`. To add it to an existing database, run `mix run priv/repo/seeds.exs`.
 
 ## Configuration
 
