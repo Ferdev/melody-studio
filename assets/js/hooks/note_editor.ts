@@ -74,6 +74,11 @@ export class NoteEditor {
   private drag: Drag | null = null
   private marquee: Marquee | null = null
   private barDrag: BarDrag | null = null
+  /** Notes shown while recording, in place of the saved notes. */
+  private preview: Note[] | null = null
+  /** The beat that plays now, or null when nothing plays. */
+  private playBeat: number | null = null
+  private playhead: HTMLElement | null = null
   private blocks = new Map<Note, HTMLElement>()
   private low = 60
   private high = 72
@@ -322,8 +327,60 @@ export class NoteEditor {
     }
   }
 
-  private lastUsedBar() {
-    const notes = this.host.notes()
+  /**
+   * Shows the notes of a take while it is recorded, or the saved notes again
+   * when `notes` is null.
+   */
+  showPreview(notes: Note[] | null) {
+    this.preview = notes
+    this.render()
+  }
+
+  /** Moves the playhead to a beat and marks the notes that sound there. Null hides it. */
+  setPlayhead(beat: number | null) {
+    this.playBeat = beat
+
+    // The grid shows more bars when the playhead goes past them.
+    if (beat !== null && Math.floor(beat / BEATS_PER_BAR) >= this.shownBars - 1 && this.shownBars * BEATS_PER_BAR < this.host.maxBeats()) {
+      this.render()
+      return
+    }
+
+    this.placePlayhead()
+    this.markSounding()
+  }
+
+  private placePlayhead() {
+    const head = this.playhead
+    if (!head) return
+    if (this.playBeat === null) {
+      head.classList.add("hidden")
+      return
+    }
+
+    const x = this.playBeat * PX_PER_BEAT
+    head.classList.remove("hidden")
+    head.style.left = `${x}px`
+
+    // Keep the playhead in view.
+    const scroller = this.roll.parentElement
+    if (scroller && (x < scroller.scrollLeft || x > scroller.scrollLeft + scroller.clientWidth - 40)) {
+      scroller.scrollLeft = Math.max(0, x - 40)
+    }
+  }
+
+  private markSounding() {
+    const beat = this.playBeat
+    for (const [note, block] of this.blocks) {
+      const sounding = beat !== null && note.start <= beat + EPSILON && beat < note.start + note.duration
+      block.classList.toggle("ring-4", sounding)
+      block.classList.toggle("ring-accent", sounding)
+      block.classList.toggle("brightness-110", sounding)
+      block.classList.toggle("z-20", sounding)
+    }
+  }
+
+  private lastUsedBar(notes = this.host.notes()) {
     if (notes.length === 0) return -1
     return Math.floor((maxOf(notes, (n) => n.start + n.duration) - EPSILON) / BEATS_PER_BAR)
   }
@@ -338,16 +395,22 @@ export class NoteEditor {
   // Drawing
 
   render() {
-    const notes = this.host.notes()
-    this.editor.classList.toggle("hidden", notes.length === 0)
-    for (const note of [...this.selected]) if (!notes.includes(note)) this.selected.delete(note)
+    const recording = this.preview !== null
+    const notes = this.preview ?? this.host.notes()
+    this.editor.classList.toggle("hidden", notes.length === 0 && !recording)
+    const saved = this.host.notes()
+    for (const note of [...this.selected]) if (!saved.includes(note)) this.selected.delete(note)
 
     const pitches = notes.map((n) => n.pitch)
     this.low = Math.min(...pitches, 60) - 2
     this.high = Math.max(...pitches, this.low + 14) + 2
 
     const maxBars = this.host.maxBeats() / BEATS_PER_BAR
-    this.shownBars = Math.min(maxBars, Math.max(2, this.lastUsedBar() + 2, (this.bars?.to ?? 0) + 2))
+    const playBar = this.playBeat === null ? 0 : Math.floor(this.playBeat / BEATS_PER_BAR)
+    this.shownBars = Math.min(
+      maxBars,
+      Math.max(2, this.lastUsedBar(notes) + 2, (this.bars?.to ?? 0) + 2, playBar + 2)
+    )
     if (this.bars && this.bars.to >= this.shownBars) this.bars = null
 
     const width = this.shownBars * BEATS_PER_BAR * PX_PER_BEAT
@@ -411,18 +474,29 @@ export class NoteEditor {
       this.roll.appendChild(block)
     })
 
+    const head = document.createElement("div")
+    head.dataset.role = "playhead"
+    head.className = "pointer-events-none absolute top-0 bottom-0 z-30 hidden w-0.5 -translate-x-1/2 bg-accent shadow"
+    this.roll.appendChild(head)
+    this.playhead = head
+
     this.paint()
+    this.placePlayhead()
   }
 
   /** Updates the look of the picked notes and the buttons, without rebuilding the grid. */
   private paint() {
+    const recording = this.preview !== null
     for (const [note, block] of this.blocks) {
-      const picked = this.selected.has(note)
-      block.className = [
-        "absolute flex cursor-grab items-center overflow-hidden rounded-md pl-1.5 text-[11px] font-bold leading-none shadow-sm",
-        picked ? "bg-secondary text-secondary-content ring-2 ring-secondary/40 z-10" : "bg-primary text-primary-content",
-      ].join(" ")
+      const picked = !recording && this.selected.has(note)
+      const look = recording
+        ? "bg-primary/70 text-primary-content"
+        : picked
+          ? "cursor-grab bg-secondary text-secondary-content ring-2 ring-secondary/40 z-10"
+          : "cursor-grab bg-primary text-primary-content"
+      block.className = `absolute flex items-center overflow-hidden rounded-md pl-1.5 text-[11px] font-bold leading-none shadow-sm ${look}`
     }
+    this.markSounding()
 
     const busy = this.host.busy()
     const count = this.selected.size

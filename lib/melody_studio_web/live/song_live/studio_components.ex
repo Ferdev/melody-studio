@@ -66,7 +66,8 @@ defmodule MelodyStudioWeb.SongLive.StudioComponents do
         <div>
           <h2 class="font-display text-xl font-bold">Play your melody</h2>
           <p class="text-base-content/70">
-            Press Record, listen to the count-in, then play your tune. Press Stop when you are done.
+            Press Record and play your tune. Recording starts with the first note you play.
+            Press Stop when you are done.
           </p>
         </div>
 
@@ -106,6 +107,17 @@ defmodule MelodyStudioWeb.SongLive.StudioComponents do
                 /> Metronome
               </label>
               <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  data-option="waitForNote"
+                  class="toggle toggle-primary toggle-sm"
+                  checked
+                /> Start on my first note
+              </label>
+              <label
+                class="flex cursor-pointer items-center gap-2"
+                title="Turn off Start on my first note to use the count-in"
+              >
                 <input
                   type="checkbox"
                   data-option="countIn"

@@ -9,22 +9,42 @@ const COMPUTER_KEYS: Record<string, number> = {
   k: 12, o: 13, l: 14, p: 15, ";": 16,
 }
 
-type Mode = "idle" | "count-in" | "recording" | "playing"
+/** A note played up to this many beats before the first beat counts as on the first beat. */
+const EARLY_TOLERANCE = 0.25
+
+/**
+ * idle: nothing happens. armed: waiting for the first note to start recording.
+ * count-in: the metronome counts before recording. recording, playing: as named.
+ */
+type Mode = "idle" | "armed" | "count-in" | "recording" | "playing"
+
+interface ActiveNote {
+  start: number
+  velocity: number
+}
 
 interface State {
   notes: Note[]
   history: Note[][]
   take: Note[]
-  active: Map<number, { start: number; velocity: number }>
+  active: Map<number, ActiveNote>
   mode: Mode
   tempo: number
   maxBeats: number
   octave: number
+  /** The audio time of beat 0 of the take or of the playback. */
   startAt: number
+  /** The beat where the playback ends. */
+  playEnd: number
+  /** The live piano. It is never stopped, so it answers at once. */
   piano: Tone.PolySynth | null
+  /** The piano for playback. Disposing it cancels the notes scheduled ahead. */
+  player: Tone.PolySynth | null
   click: Tone.Synth | null
   pressed: Map<string | number, number>
-  timers: number[]
+  lit: Set<number>
+  frame: number
+  lastPreview: number
   midiAccess: MIDIAccess | null
   cleanup: (() => void)[]
   editor: NoteEditor | null
@@ -39,7 +59,7 @@ function $(self: Self, selector: string) {
 
 function setStatus(self: Self, text: string) {
   const status = $(self, "[data-role=status]")
-  if (status) status.textContent = text
+  if (status && status.textContent !== text) status.textContent = text
 }
 
 function beat(self: Self) {
@@ -82,161 +102,293 @@ function highlight(self: Self, pitch: number, down: boolean) {
   key?.classList.toggle("is-down", down)
 }
 
-async function ensureAudio(self: Self) {
-  await Tone.start()
+// -----------------------------------------------------------------------------
+// Audio timing
+
+/** The audio clock now, without Tone's look-ahead, so live notes sound at once. */
+function audioNow() {
+  return Tone.immediate()
+}
+
+/**
+ * How late the speakers play a sound after the code starts it. People play
+ * along with what they hear, so the recorder moves their notes back by this.
+ */
+function outputLatency() {
+  const raw = Tone.getContext().rawContext as AudioContext
+  const latency = raw.outputLatency || raw.baseLatency || 0
+  return Math.min(Math.max(latency, 0), 0.15)
+}
+
+function beatAt(self: Self, time: number) {
+  return (time - self.s.startAt) / beat(self)
+}
+
+/** Makes the sounds ready. Building them is synchronous, so a key press never waits. */
+function prepareSounds(self: Self) {
+  if (Tone.getContext().state !== "running") Tone.start()
   if (!self.s.piano) self.s.piano = createPiano().toDestination()
   if (!self.s.click) self.s.click = createClick().toDestination()
 }
 
-function nowBeats(self: Self) {
-  return (Tone.now() - self.s.startAt) / beat(self)
-}
+// -----------------------------------------------------------------------------
+// Playing the piano
 
-async function noteOn(self: Self, pitch: number, velocity = 0.8) {
-  await ensureAudio(self)
-  self.s.piano!.triggerAttack(midiToFrequency(pitch), Tone.now(), velocity)
+function noteOn(self: Self, pitch: number, velocity = 0.8) {
+  // Read the clock first, so nothing else delays the time of the note.
+  const time = audioNow()
+  prepareSounds(self)
+  self.s.piano!.triggerAttack(midiToFrequency(pitch), time, velocity)
   highlight(self, pitch, true)
 
+  const heard = time - outputLatency()
+  if (self.s.mode === "armed") startTakeNow(self, heard)
+
   if (self.s.mode === "recording" || self.s.mode === "count-in") {
-    self.s.active.set(pitch, { start: nowBeats(self), velocity })
+    self.s.active.set(pitch, { start: beatAt(self, heard), velocity })
   }
 }
 
 function noteOff(self: Self, pitch: number) {
-  self.s.piano?.triggerRelease(midiToFrequency(pitch), Tone.now())
+  const time = audioNow()
+  self.s.piano?.triggerRelease(midiToFrequency(pitch), time)
   highlight(self, pitch, false)
 
   const active = self.s.active.get(pitch)
   if (active) {
     self.s.active.delete(pitch)
-    finishNote(self, pitch, active, nowBeats(self))
+    finishNote(self, pitch, active, beatAt(self, time - outputLatency()))
   }
 }
 
-function finishNote(self: Self, pitch: number, active: { start: number; velocity: number }, end: number) {
-  let start = active.start
-  // A note pressed just before the first beat counts as on the first beat.
-  if (start < 0 && start > -0.5) start = 0
-  if (start < 0 || start >= self.s.maxBeats) return
-  const duration = Math.max(Math.min(end, self.s.maxBeats) - start, 0.1)
-  self.s.take.push({ pitch, start, duration, velocity: active.velocity })
+function finishNote(self: Self, pitch: number, active: ActiveNote, end: number) {
+  if (active.start >= self.s.maxBeats) return
+  const duration = Math.max(Math.min(end, self.s.maxBeats) - active.start, 0.1)
+  self.s.take.push({ pitch, start: active.start, duration, velocity: active.velocity })
 }
 
-function tidy(notes: Note[], snap: boolean): Note[] {
-  return notes
+// -----------------------------------------------------------------------------
+// Recording
+
+async function record(self: Self) {
+  await Tone.start()
+  prepareSounds(self)
+
+  self.s.take = []
+  self.s.active.clear()
+  self.s.editor?.clearSelection()
+
+  if (option(self, "waitForNote")) {
+    self.s.mode = "armed"
+    setStatus(self, "Ready. Recording starts with the first note you play.")
+    refreshButtons(self)
+    self.s.editor?.showPreview([])
+    return
+  }
+
+  const countIn = option(self, "countIn") ? 4 : 0
+  // Tone.now() is a little ahead of the clock, which leaves time to schedule the clicks.
+  self.s.startAt = Tone.now() + 0.05 + countIn * beat(self)
+  self.s.mode = countIn > 0 ? "count-in" : "recording"
+  scheduleClicks(self, -countIn)
+  refreshButtons(self)
+  self.s.editor?.showPreview([])
+  loop(self)
+}
+
+/** Starts the take on the first note when the recorder waits for it. */
+function startTakeNow(self: Self, heard: number) {
+  self.s.startAt = heard
+  self.s.mode = "recording"
+  // The first note is beat 1, so the clicks start on beat 2.
+  scheduleClicks(self, 1)
+  refreshButtons(self)
+  loop(self)
+}
+
+/** Schedules the metronome from a beat (negative beats are the count-in). */
+function scheduleClicks(self: Self, fromBeat: number) {
+  const metronome = option(self, "metronome")
+  const b = beat(self)
+  const click = self.s.click!
+
+  for (let index = fromBeat; index < self.s.maxBeats; index++) {
+    if (index >= 0 && !metronome) break
+    const strong = ((index % 4) + 4) % 4 === 0
+    // The clicks are heard late by the output latency, like the notes.
+    const time = self.s.startAt + index * b
+    click.triggerAttackRelease(strong ? "C6" : "G5", 0.03, time, strong ? 0.9 : 0.5)
+  }
+}
+
+function stop(self: Self) {
+  const { mode } = self.s
+  cancelAnimationFrame(self.s.frame)
+  self.s.click?.dispose()
+  self.s.click = null
+
+  if (mode === "recording" || mode === "count-in") {
+    const end = beatAt(self, audioNow() - outputLatency())
+    for (const [pitch, active] of self.s.active) finishNote(self, pitch, active, end)
+    self.s.active.clear()
+    self.s.mode = "idle"
+    self.s.editor?.setPlayhead(null)
+    self.s.editor?.showPreview(null)
+
+    if (self.s.take.length === 0) {
+      setStatus(self, "We did not hear any notes. Press Record and try again.")
+    } else {
+      const { notes, shifted } = placeTake(self.s.take, self.s.maxBeats, option(self, "snap"))
+      self.s.history.push(self.s.notes)
+      self.s.notes = notes
+      self.s.editor?.clearSelection()
+      save(self)
+      setStatus(
+        self,
+        shifted
+          ? `Nice! You started before the count-in ended, so your melody now begins on beat 1. ${describe(notes)}`
+          : `Nice! ${describe(notes)}`
+      )
+    }
+  } else if (mode === "armed") {
+    self.s.mode = "idle"
+    self.s.editor?.showPreview(null)
+    setStatus(self, describe(self.s.notes))
+  } else if (mode === "playing") {
+    // Disposing the playback piano also cancels the notes that were scheduled ahead.
+    self.s.player?.dispose()
+    self.s.player = null
+    self.s.mode = "idle"
+    self.s.editor?.setPlayhead(null)
+    setStatus(self, describe(self.s.notes))
+  }
+
+  for (const pitch of self.s.lit) highlight(self, pitch, false)
+  self.s.lit.clear()
+  refreshButtons(self)
+}
+
+/**
+ * Turns a take into the melody. Notes played during the count-in are kept:
+ * when the first note came early, the whole take moves later by whole beats.
+ */
+function placeTake(take: Note[], maxBeats: number, snap: boolean): { notes: Note[]; shifted: boolean } {
+  const earliest = Math.min(...take.map((n) => n.start))
+  let shift = 0
+  if (earliest < -EARLY_TOLERANCE) shift = Math.ceil(-earliest - 0.001)
+
+  const notes = take
     .map((note) => {
-      if (!snap) return { ...note, start: round(note.start), duration: round(note.duration) }
-      const start = Math.round(note.start * 4) / 4
-      const duration = Math.max(Math.round(note.duration * 4) / 4, 0.25)
-      return { ...note, start, duration }
+      let start = note.start + shift
+      let duration = note.duration
+      if (start < 0) {
+        duration += start
+        start = 0
+      }
+      if (snap) {
+        start = Math.round(start * 4) / 4
+        duration = Math.max(Math.round(duration * 4) / 4, 0.25)
+      } else {
+        start = round(start)
+        duration = Math.max(round(duration), 0.05)
+      }
+      return { ...note, start, duration: Math.min(duration, maxBeats - start) }
     })
+    .filter((note) => note.start < maxBeats)
     .sort((a, b) => a.start - b.start || a.pitch - b.pitch)
+
+  return { notes, shifted: shift > 0 }
 }
 
 function round(value: number) {
   return Math.round(value * 1000) / 1000
 }
 
-function clearTimers(self: Self) {
-  self.s.timers.forEach((timer) => clearTimeout(timer))
-  self.s.timers = []
+// -----------------------------------------------------------------------------
+// The animation loop: the count-in, the playhead and the notes while they sound
+
+function loop(self: Self) {
+  cancelAnimationFrame(self.s.frame)
+  const tick = () => {
+    const { mode } = self.s
+    if (mode === "count-in" || mode === "recording") tickRecording(self)
+    else if (mode === "playing") tickPlayback(self)
+    else return
+    self.s.frame = requestAnimationFrame(tick)
+  }
+  tick()
 }
 
-async function record(self: Self) {
-  await ensureAudio(self)
-  const countIn = option(self, "countIn") ? 4 : 0
-  const metronome = option(self, "metronome")
-  const b = beat(self)
+function tickRecording(self: Self) {
+  const now = beatAt(self, audioNow() - outputLatency())
 
-  self.s.take = []
-  self.s.active.clear()
-  self.s.startAt = Tone.now() + 0.15 + countIn * b
-  self.s.mode = countIn > 0 ? "count-in" : "recording"
-  refreshButtons(self)
-
-  // Metronome clicks: the count-in, then every beat while recording.
-  const totalBeats = countIn + self.s.maxBeats
-  for (let i = 0; i < totalBeats; i++) {
-    const beatIndex = i - countIn
-    if (!metronome && beatIndex >= 0) break
-    const time = self.s.startAt + beatIndex * b
-    const strong = ((beatIndex % 4) + 4) % 4 === 0
-    self.s.click!.triggerAttackRelease(strong ? "C6" : "G5", 0.03, time, strong ? 0.9 : 0.5)
-    if (i > 64) break
-  }
-
-  for (let i = 0; i < countIn; i++) {
-    const delay = (self.s.startAt - countIn * b + i * b - Tone.now()) * 1000
-    self.s.timers.push(window.setTimeout(() => setStatus(self, `Get ready... ${countIn - i}`), Math.max(delay, 0)))
-  }
-
-  const recordDelay = Math.max((self.s.startAt - Tone.now()) * 1000, 0)
-  self.s.timers.push(
-    window.setTimeout(() => {
-      if (self.s.mode === "count-in") self.s.mode = "recording"
-      setStatus(self, "Recording... play your melody now.")
-    }, recordDelay)
-  )
-
-  // Stop on its own at the longest melody length.
-  self.s.timers.push(window.setTimeout(() => stop(self), recordDelay + self.s.maxBeats * b * 1000))
-}
-
-function stop(self: Self) {
-  const { mode } = self.s
-  clearTimers(self)
-  self.s.click?.dispose()
-  self.s.click = null
-
-  if (mode === "recording" || mode === "count-in") {
-    const end = nowBeats(self)
-    for (const [pitch, active] of self.s.active) finishNote(self, pitch, active, end)
-    self.s.active.clear()
-    self.s.mode = "idle"
-
-    if (self.s.take.length === 0) {
-      setStatus(self, "We did not hear any notes. Press Record and try again.")
-    } else {
-      self.s.history.push(self.s.notes)
-      self.s.notes = tidy(self.s.take, option(self, "snap"))
-      self.s.editor?.clearSelection()
-      save(self)
-      setStatus(self, `Nice! ${describe(self.s.notes)}`)
+  if (self.s.mode === "count-in") {
+    if (now < 0) {
+      setStatus(self, `Get ready... ${Math.ceil(-now)}`)
+      return
     }
-  } else if (mode === "playing") {
-    // Disposing the piano also cancels the notes that were scheduled ahead.
-    self.s.piano?.dispose()
-    self.s.piano = null
-    self.el.querySelectorAll(".is-down").forEach((key) => key.classList.remove("is-down"))
-    self.s.mode = "idle"
-    setStatus(self, describe(self.s.notes))
+    self.s.mode = "recording"
   }
 
-  refreshButtons(self)
+  setStatus(self, "Recording... play your melody now.")
+  if (now >= self.s.maxBeats) return stop(self)
+
+  self.s.editor?.setPlayhead(now)
+
+  // Redraw the take a few times a second, with the held notes growing.
+  const time = performance.now()
+  if (time - self.s.lastPreview > 80) {
+    self.s.lastPreview = time
+    const held = [...self.s.active].map(([pitch, a]) => ({
+      pitch,
+      start: Math.max(a.start, 0),
+      duration: Math.max(now - Math.max(a.start, 0), 0.1),
+      velocity: a.velocity,
+    }))
+    const done = self.s.take.map((n) => (n.start < 0 ? { ...n, duration: n.duration + n.start, start: 0 } : n))
+    self.s.editor?.showPreview([...done, ...held].filter((n) => n.duration > 0))
+    self.s.editor?.setPlayhead(now)
+  }
 }
+
+function tickPlayback(self: Self) {
+  const now = beatAt(self, audioNow() - outputLatency())
+  if (now > self.s.playEnd + 0.1) return stop(self)
+
+  self.s.editor?.setPlayhead(Math.max(now, 0))
+
+  // Light the piano keys of the notes that sound now.
+  const sounding = new Set(
+    self.s.notes.filter((n) => n.start <= now && now < n.start + n.duration).map((n) => n.pitch)
+  )
+  for (const pitch of self.s.lit) if (!sounding.has(pitch)) highlight(self, pitch, false)
+  for (const pitch of sounding) if (!self.s.lit.has(pitch)) highlight(self, pitch, true)
+  self.s.lit = sounding
+}
+
+// -----------------------------------------------------------------------------
+// Playback and the other buttons
 
 async function play(self: Self) {
   if (self.s.notes.length === 0) return
-  await ensureAudio(self)
+  await Tone.start()
+  prepareSounds(self)
+
   const b = beat(self)
-  const start = Tone.now() + 0.1
-  self.s.mode = "playing"
-  refreshButtons(self)
-  setStatus(self, "Playing your melody...")
+  const player = createPiano().toDestination()
+  self.s.player = player
+  self.s.startAt = Tone.now() + 0.05
+  self.s.playEnd = self.s.notes.reduce((max, n) => Math.max(max, n.start + n.duration), 0)
 
   for (const note of self.s.notes) {
-    self.s.piano!.triggerAttackRelease(midiToFrequency(note.pitch), note.duration * b, start + note.start * b, note.velocity)
-    self.s.timers.push(
-      window.setTimeout(() => highlight(self, note.pitch, true), (start + note.start * b - Tone.now()) * 1000),
-      window.setTimeout(
-        () => highlight(self, note.pitch, false),
-        (start + (note.start + note.duration) * b - Tone.now()) * 1000
-      )
-    )
+    player.triggerAttackRelease(midiToFrequency(note.pitch), note.duration * b, self.s.startAt + note.start * b, note.velocity)
   }
 
-  const end = self.s.notes.reduce((max, n) => Math.max(max, n.start + n.duration), 0)
-  self.s.timers.push(window.setTimeout(() => stop(self), (end * b + 0.4) * 1000))
+  self.s.mode = "playing"
+  self.s.editor?.clearSelection()
+  refreshButtons(self)
+  setStatus(self, "Playing your melody...")
+  loop(self)
 }
 
 function undo(self: Self) {
@@ -264,9 +416,18 @@ function save(self: Self) {
 }
 
 /** Plays a short note so the person hears the note they picked or moved. */
-async function preview(self: Self, pitch: number) {
-  await ensureAudio(self)
-  self.s.piano!.triggerAttackRelease(midiToFrequency(pitch), 0.25, Tone.now(), 0.7)
+function preview(self: Self, pitch: number) {
+  prepareSounds(self)
+  self.s.piano!.triggerAttackRelease(midiToFrequency(pitch), 0.25, audioNow(), 0.7)
+}
+
+/** The count-in only matters when the recorder does not wait for the first note. */
+function syncOptions(self: Self) {
+  const wait = option(self, "waitForNote")
+  const countIn = self.el.querySelector("[data-option=countIn]") as HTMLInputElement | null
+  if (!countIn) return
+  countIn.disabled = wait
+  countIn.closest("label")?.classList.toggle("opacity-50", wait)
 }
 
 function connectMidi(self: Self) {
@@ -329,10 +490,14 @@ export const MelodyRecorder = {
       maxBeats: Number(self.el.dataset.maxBeats) || 64,
       octave: 0,
       startAt: 0,
+      playEnd: 0,
       piano: null,
+      player: null,
       click: null,
       pressed: new Map(),
-      timers: [],
+      lit: new Set(),
+      frame: 0,
+      lastPreview: 0,
       midiAccess: null,
       cleanup: [],
       editor: null,
@@ -357,6 +522,14 @@ export const MelodyRecorder = {
 
     setStatus(self, describe(notes))
     refreshButtons(self)
+    syncOptions(self)
+    self.el.addEventListener("change", (event) => {
+      if ((event.target as HTMLElement).matches("[data-option]")) syncOptions(self)
+    })
+
+    // Build the sounds on the first touch, so the first note does not wait for them.
+    const warmUp = () => prepareSounds(self)
+    self.el.addEventListener("pointerdown", warmUp, { once: true })
 
     const actions: Record<string, () => void> = {
       record: () => record(self),
@@ -390,21 +563,25 @@ export const MelodyRecorder = {
     keyboard.addEventListener("pointercancel", release)
     keyboard.addEventListener("pointerleave", release)
 
-    const typing = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement
-      return ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName) || event.metaKey || event.ctrlKey || event.altKey
+    // Only fields where people type text keep the keys; toggles and sliders do not.
+    const isTextField = (target: HTMLElement) => {
+      if (target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) return true
+      if (target.tagName !== "INPUT") return false
+      const type = (target as HTMLInputElement).type
+      return !["checkbox", "radio", "range", "button", "submit"].includes(type)
     }
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
-      if (["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return
+      if (isTextField(target)) return
       // The note editor has shortcuts with Ctrl or Cmd, so it sees the key first.
       if (self.s.editor?.handleKey(event)) return
-      if (typing(event)) return
-      if (event.repeat) return
+      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return
       const key = event.key.toLowerCase()
       if (key === "z") self.s.octave = Math.max(self.s.octave - 1, -2)
       if (key === "x") self.s.octave = Math.min(self.s.octave + 1, 2)
       if (key in COMPUTER_KEYS) {
+        // A focused button would also react to the key, for example Space or Enter.
+        event.preventDefault()
         const pitch = 60 + self.s.octave * 12 + COMPUTER_KEYS[key]
         self.s.pressed.set(key, pitch)
         noteOn(self, pitch)
@@ -422,6 +599,7 @@ export const MelodyRecorder = {
     self.s.cleanup.push(() => {
       window.removeEventListener("keydown", onKeyDown)
       window.removeEventListener("keyup", onKeyUp)
+      self.el.removeEventListener("pointerdown", warmUp)
     })
 
     connectMidi(self)
@@ -432,7 +610,7 @@ export const MelodyRecorder = {
   },
 
   destroyed(this: Self) {
-    clearTimers(this)
+    cancelAnimationFrame(this.s.frame)
     if (this.s.saveTimer) {
       clearTimeout(this.s.saveTimer)
       // Send the last edit before the recorder leaves the page.
@@ -444,6 +622,7 @@ export const MelodyRecorder = {
     }
     this.s.cleanup.forEach((fn) => fn())
     this.s.piano?.dispose()
+    this.s.player?.dispose()
     this.s.click?.dispose()
     if (this.s.midiAccess) {
       this.s.midiAccess.inputs.forEach((input) => (input.onmidimessage = null))
