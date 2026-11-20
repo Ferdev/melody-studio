@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+# Container entry point: migrate the database, then start the web server.
+cd -P -- "$(dirname -- "$0")"
+./migrate
+exec ./server

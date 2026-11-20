@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+# Runs the Ecto migrations of every repo of the app, without Mix.
+cd -P -- "$(dirname -- "$0")"
+exec ./melody_studio eval '
+  Application.ensure_all_started(:ssl)
+  Application.load(:melody_studio)
+
+  for repo <- Application.fetch_env!(:melody_studio, :ecto_repos) do
+    {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+  end
+'

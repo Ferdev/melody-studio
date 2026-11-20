@@ -1,0 +1,61 @@
+# Kamal deploy configuration of Melody Studio.
+# The "Deploy production" GitHub Actions workflow runs `kamal deploy` with it.
+# The server runs a shared kamal-proxy that serves several apps; this file
+# only adds the melody-studio service and its database to it.
+service: melody-studio
+image: ferdev/melody-studio
+
+servers:
+  web:
+    hosts:
+      - 65.21.83.80
+
+ssh:
+  user: deploy
+
+proxy:
+  ssl: true
+  host: melody-studio.ferdev.com
+  app_port: 4000
+  healthcheck:
+    path: /up
+    interval: 3
+    timeout: 3
+
+# The first boot of a new container runs the database migrations first.
+deploy_timeout: 90
+
+registry:
+  server: ghcr.io
+  username:
+    - KAMAL_REGISTRY_USERNAME
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+  cache:
+    type: gha
+    options: mode=max
+
+env:
+  clear:
+    PHX_HOST: melody-studio.ferdev.com
+    PORT: "4000"
+    POOL_SIZE: "10"
+  secret:
+    - SECRET_KEY_BASE
+    - DATABASE_URL
+
+accessories:
+  postgres:
+    image: postgres:16-alpine
+    host: 65.21.83.80
+    env:
+      clear:
+        POSTGRES_USER: melody_studio
+        POSTGRES_DB: melody_studio_prod
+      secret:
+        - POSTGRES_PASSWORD
+    volumes:
+      - melody-studio-postgres-data:/var/lib/postgresql/data
