@@ -1,0 +1,82 @@
+<Layouts.app flash={@flash} current_scope={@current_scope} wide>
+  <section class="grid items-center gap-10 overflow-x-clip px-1 py-4 lg:grid-cols-2 lg:py-10">
+    <div class="space-y-6">
+      <span class="badge badge-accent badge-lg rounded-full font-semibold">
+        No music software skills needed
+      </span>
+      <h1 class="font-display text-4xl font-extrabold leading-tight sm:text-5xl">
+        Turn the tune in your head into a <span class="text-primary">whole song</span>.
+      </h1>
+      <p class="text-lg text-base-content/75">
+        Play a melody on the piano, choose a style, and let AI bring in the band:
+        drums, bass, chords and more. Then make it sound just right and download it.
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <%= if @current_scope do %>
+          <.link navigate={~p"/songs"} class="btn btn-primary btn-lg rounded-full">
+            <.icon name="hero-musical-note" class="size-5" /> Go to my songs
+          </.link>
+        <% else %>
+          <.link navigate={~p"/users/register"} class="btn btn-primary btn-lg rounded-full">
+            <.icon name="hero-sparkles" class="size-5" /> Make my first song
+          </.link>
+          <.link navigate={~p"/users/log-in"} class="btn btn-ghost btn-lg rounded-full">
+            I have an account
+          </.link>
+        <% end %>
+      </div>
+    </div>
+
+    <div class="relative" aria-hidden="true">
+      <div class="absolute -inset-4 -z-10 rotate-2 rounded-[2.5rem] bg-gradient-to-br from-primary/30 via-accent/30 to-secondary/30" />
+      <div class="space-y-3 rounded-[2rem] bg-base-100 p-6 shadow-xl">
+        <div
+          :for={
+            {name, emoji, color, width} <- [
+              {"Your melody", "🎵", "bg-primary", "w-3/4"},
+              {"Drums", "🥁", "bg-secondary", "w-full"},
+              {"Bass", "🎻", "bg-accent", "w-5/6"},
+              {"Keys", "🎹", "bg-success", "w-2/3"},
+              {"Strings", "🎼", "bg-info", "w-11/12"}
+            ]
+          }
+          class="flex items-center gap-3"
+        >
+          <span class="w-28 shrink-0 text-sm font-semibold">{emoji} {name}</span>
+          <div class="h-8 flex-1 rounded-full bg-base-200">
+            <div class={["h-8 rounded-full opacity-80 wave", color, width]} />
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid gap-4 py-10 sm:grid-cols-2 lg:grid-cols-4">
+    <div
+      :for={
+        {step, title, text, icon} <- [
+          {1, "Play your melody",
+           "Use the on-screen piano, your computer keyboard or a MIDI keyboard.",
+           "hero-musical-note"},
+          {2, "Choose a style", "Pop, rock, lo-fi, jazz and more. Pick the instruments you like.",
+           "hero-swatch"},
+          {3, "AI builds the band",
+           "AI writes chords, picks a groove and records each instrument.", "hero-sparkles"},
+          {4, "Mix and download",
+           "Make it louder, wider or dreamier with simple sliders. Save a WAV file.",
+           "hero-arrow-down-tray"}
+        ]
+      }
+      class="rounded-box bg-base-100 p-6 shadow-sm"
+    >
+      <div class="mb-3 flex items-center gap-3">
+        <span class="grid size-10 place-items-center rounded-full bg-primary/15 font-bold text-primary">
+          {step}
+        </span>
+        <.icon name={icon} class="size-6 text-primary" />
+      </div>
+      <h2 class="font-display text-lg font-bold">{title}</h2>
+      <p class="mt-1 text-base-content/70">{text}</p>
+    </div>
+  </section>
+</Layouts.app>
